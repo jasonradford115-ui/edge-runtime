@@ -3,6 +3,7 @@
 
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::error::Error;
 use std::io;
 use std::io::BufRead;
 use std::io::Cursor;
@@ -21,6 +22,7 @@ use base::integration_test;
 use base::integration_test_listen_fut;
 use base::integration_test_with_server_flag;
 use base::server::Builder;
+use base::server::RequestIdleTimeout;
 use base::server::ServerEvent;
 use base::server::ServerFlags;
 use base::server::ServerHealth;
@@ -1249,21 +1251,25 @@ async fn req_failure_case_op_cancel_from_server_due_to_cpu_resource_limit() {
     120 * MB,
     None,
     |resp| async {
-      let res = resp.unwrap();
+      if let Err(err) = resp {
+        assert_connection_aborted(err);
+      } else {
+        let res = resp.unwrap();
 
-      assert_eq!(res.status().as_u16(), 500);
+        assert_eq!(res.status().as_u16(), 500);
 
-      let res = res.json::<ErrorResponsePayload>().await;
+        let res = res.json::<ErrorResponsePayload>().await;
 
-      assert!(res.is_ok());
+        assert!(res.is_ok());
 
-      let msg = res.unwrap().msg;
+        let msg = res.unwrap().msg;
 
-      assert!(
-        msg
-          == "WorkerRequestCancelled: request has been cancelled by supervisor"
-          || msg == "broken pipe"
-      );
+        assert!(
+          msg
+            == "WorkerRequestCancelled: request has been cancelled by supervisor"
+            || msg == "broken pipe"
+        );
+      }
     },
   )
   .await;
@@ -1277,24 +1283,28 @@ async fn req_failure_case_op_cancel_from_server_due_to_cpu_resource_limit_2() {
     10 * MB,
     Some("image/png"),
     |resp| async {
-      let res = resp.unwrap();
+      if let Err(err) = resp {
+        assert_connection_aborted(err);
+      } else {
+        let res = resp.unwrap();
 
-      assert_eq!(res.status().as_u16(), 500);
+        assert_eq!(res.status().as_u16(), 500);
 
-      let res = res.json::<ErrorResponsePayload>().await;
+        let res = res.json::<ErrorResponsePayload>().await;
 
-      assert!(res.is_ok());
+        assert!(res.is_ok());
 
-      let msg = res.unwrap().msg;
+        let msg = res.unwrap().msg;
 
-      assert!(
-        !msg.starts_with("TypeError: request body receiver not connected")
-      );
-      assert!(
-        msg
-          == "WorkerRequestCancelled: request has been cancelled by supervisor"
-          || msg == "broken pipe"
-      );
+        assert!(
+          !msg.starts_with("TypeError: request body receiver not connected")
+        );
+        assert!(
+          msg
+            == "WorkerRequestCancelled: request has been cancelled by supervisor"
+            || msg == "broken pipe"
+        );
+      }
     },
   )
   .await;
@@ -1860,7 +1870,7 @@ async fn test_request_idle_timeout_no_streamed_response(
 
   integration_test_with_server_flag!(
     ServerFlags {
-      request_idle_timeout_ms: Some(1000),
+      request_idle_timeout: RequestIdleTimeout::from_millis(None, Some(1000)),
       ..Default::default()
     },
     "./test_cases/main",
@@ -1918,7 +1928,7 @@ async fn test_request_idle_timeout_streamed_response(maybe_tls: Option<Tls>) {
 
   integration_test_with_server_flag!(
     ServerFlags {
-      request_idle_timeout_ms: Some(2000),
+      request_idle_timeout: RequestIdleTimeout::from_millis(None, Some(2000)),
       ..Default::default()
     },
     "./test_cases/main",
@@ -1991,7 +2001,7 @@ async fn test_request_idle_timeout_streamed_response_first_chunk_timeout(
 
   integration_test_with_server_flag!(
     ServerFlags {
-      request_idle_timeout_ms: Some(1000),
+      request_idle_timeout: RequestIdleTimeout::from_millis(None, Some(1000)),
       ..Default::default()
     },
     "./test_cases/main",
@@ -2079,7 +2089,7 @@ async fn test_request_idle_timeout_websocket_deno(
 
   integration_test_with_server_flag!(
     ServerFlags {
-      request_idle_timeout_ms: Some(1000),
+      request_idle_timeout: RequestIdleTimeout::from_millis(None, Some(1000)),
       ..Default::default()
     },
     "./test_cases/main",
@@ -4245,6 +4255,39 @@ async fn test_pin_package_version_correctly() {
   );
 }
 
+#[tokio::test]
+#[serial]
+async fn test_drop_socket_when_http_handler_returns_an_invalid_value() {
+  {
+    integration_test!(
+      "./test_cases/main",
+      NON_SECURE_PORT,
+      "return-invalid-resp",
+      None,
+      None,
+      None,
+      (|resp| async {
+        assert_connection_aborted(resp.unwrap_err());
+      }),
+      TerminationToken::new()
+    );
+  }
+  {
+    integration_test!(
+      "./test_cases/main",
+      NON_SECURE_PORT,
+      "return-invalid-resp-2",
+      None,
+      None,
+      None,
+      (|resp| async {
+        assert_connection_aborted(resp.unwrap_err());
+      }),
+      TerminationToken::new()
+    );
+  }
+}
+
 #[derive(Deserialize)]
 struct ErrorResponsePayload {
   msg: String,
@@ -4380,4 +4423,20 @@ fn new_localhost_tls(secure: bool) -> Option<Tls> {
   secure.then(|| {
     Tls::new(SECURE_PORT, TLS_LOCALHOST_KEY, TLS_LOCALHOST_CERT).unwrap()
   })
+}
+
+fn assert_connection_aborted(err: reqwest::Error) {
+  let source = err.source();
+  let hyper_err = source
+    .and_then(|err| err.downcast_ref::<hyper::Error>())
+    .unwrap();
+
+  if hyper_err.is_incomplete_message() {
+    return;
+  }
+
+  let cause = hyper_err.source().unwrap();
+  let cause = cause.downcast_ref::<std::io::Error>().unwrap();
+
+  assert_eq!(cause.kind(), std::io::ErrorKind::ConnectionReset);
 }
