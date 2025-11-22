@@ -109,7 +109,7 @@ impl UpgradeStream {
   }
 }
 
-fn http_error(message: &'static str) -> AnyError {
+pub(crate) fn http_error(message: &'static str) -> AnyError {
   custom_error("Http", message)
 }
 

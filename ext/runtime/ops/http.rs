@@ -7,7 +7,6 @@ use std::task::Poll;
 
 use anyhow::bail;
 use anyhow::Context;
-use deno_core::error::custom_error;
 use deno_core::error::AnyError;
 use deno_core::op2;
 use deno_core::unsync::sync::AtomicFlag;
@@ -36,6 +35,7 @@ use tokio::net::UnixStream;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
+use crate::upgrade::http_error;
 use crate::upgrade::UpgradeStream;
 use crate::upgrade::WebSocketUpgrade;
 
@@ -229,10 +229,6 @@ where
 
 pub(crate) type DuplexStream2 = Stream2<DuplexStream>;
 pub(crate) type UnixStream2 = Stream2<UnixStream>;
-
-fn http_error(message: &'static str) -> AnyError {
-  custom_error("Http", message)
-}
 
 #[op2(async)]
 #[smi]
