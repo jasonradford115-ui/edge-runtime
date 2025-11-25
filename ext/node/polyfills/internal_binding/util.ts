@@ -128,3 +128,7 @@ export function getOwnNonIndexProperties(
   }
   return result;
 }
+
+export const untransferableSymbol = Symbol.for(
+  "nodejs.worker_threads.untransferable",
+);
