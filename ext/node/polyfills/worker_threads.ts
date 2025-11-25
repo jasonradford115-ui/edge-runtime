@@ -445,7 +445,7 @@ export function isMarkedAsUntransferable(object: any): boolean {
   if (object === null || typeof object !== "object") {
     return false;
   }
-  return object[untransferableSymbol] === true;
+  return object[untransferableSymbol] !== undefined;
 }
 
 export function moveMessagePortToContext() {
