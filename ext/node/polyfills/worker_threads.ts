@@ -5,6 +5,7 @@ import { core, internals, primordials } from "ext:core/mod.js";
 import { EventTarget } from "ext:deno_web/02_event.js";
 import { unrefPollForMessages } from "ext:deno_web/13_message_port.js";
 import { notImplemented } from "ext:deno_node/_utils.ts";
+import { untransferableSymbol } from "ext:deno_node/internal_binding/util.ts";
 import { EventEmitter } from "node:events";
 import process from "node:process";
 
@@ -418,9 +419,35 @@ export function setEnvironmentData(key: unknown, value?: unknown) {
 }
 
 export const SHARE_ENV = SymbolFor("nodejs.worker_threads.SHARE_ENV");
-export function markAsUntransferable() {
-  notImplemented("markAsUntransferable");
+
+/**
+ * Marks an object as not transferable. If object occurs in the transfer list of
+ * a port.postMessage() call, it is ignored.
+ *
+ * @param {object} object - The object to mark as untransferable.
+ */
+// deno-lint-ignore no-explicit-any
+export function markAsUntransferable(object: any): void {
+  if (object === null || typeof object !== "object") {
+    return;
+  }
+  object[untransferableSymbol] = true;
 }
+
+/**
+ * Check if an object is marked as not transferable.
+ *
+ * @param {object} object - The object to check.
+ * @returns {boolean} - True if the object is marked as untransferable.
+ */
+// deno-lint-ignore no-explicit-any
+export function isMarkedAsUntransferable(object: any): boolean {
+  if (object === null || typeof object !== "object") {
+    return false;
+  }
+  return object[untransferableSymbol] === true;
+}
+
 export function moveMessagePortToContext() {
   notImplemented("moveMessagePortToContext");
 }
@@ -560,6 +587,7 @@ export {
 
 const defaultExport = {
   markAsUntransferable,
+  isMarkedAsUntransferable,
   moveMessagePortToContext,
   receiveMessageOnPort,
   MessagePort,
